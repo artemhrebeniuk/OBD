@@ -16,18 +16,27 @@ import random
 import threading
 import time
 import logging
+from logging.handlers import RotatingFileHandler
 from typing import Optional
 
 # ---------------------------------------------------------------------------
 #  Настройка логирования
 # ---------------------------------------------------------------------------
-log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "obd_dashboard.log")
+if getattr(sys, 'frozen', False):
+    # Если запущено как скомпилированный .exe/.app файл
+    base_dir = os.path.dirname(sys.executable)
+else:
+    # Если запущено как обычный скрипт .py
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
+log_file = os.path.join(base_dir, "obd_dashboard.log")
+
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(threadName)s: %(message)s",
     handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
+        RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=1, encoding='utf-8'),
         logging.StreamHandler(sys.stdout)
     ]
 )
