@@ -849,7 +849,7 @@ class OBDApp(QMainWindow):
             self.lbl_badge.setStyleSheet("color: #00e676; margin-left: 15px;")
         else:
             self.lbl_status.setText(f"● {status}")
-            if "CAR_CONNECTED" in status:
+            if "car connected" in status.lower() or "car_connected" in status.lower():
                 self.lbl_status.setStyleSheet("color: #00e676;")
                 self.lbl_info.setText(f"Port: {port}")
                 
