@@ -656,8 +656,10 @@ class OBDApp(QMainWindow):
                 conn.watch(obd.commands.CONTROL_MODULE_VOLTAGE, callback=self._on_voltage_bg)
                 logger.info("Подписка на CONTROL_MODULE_VOLTAGE — OK")
                 
-            if obd.commands.AMBIENT_AIR_TEMP in conn.supported_commands:
-                conn.watch(obd.commands.AMBIENT_AIR_TEMP, callback=self._on_ambient_bg)
+            # Учитываем опечатку в самой библиотеке python-obd (AMBIANT вместо AMBIENT)
+            cmd_ambient = getattr(obd.commands, "AMBIANT_AIR_TEMP", getattr(obd.commands, "AMBIENT_AIR_TEMP", None))
+            if cmd_ambient and cmd_ambient in conn.supported_commands:
+                conn.watch(cmd_ambient, callback=self._on_ambient_bg)
                 logger.info("Подписка на AMBIENT_AIR_TEMP — OK")
 
             conn.start()
