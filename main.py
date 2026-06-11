@@ -42,13 +42,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Подавляем предупреждения от библиотеки pint (используемой в python-obd)
+# Подавляем предупреждения от библиотек python-obd и pint
 logging.getLogger("pint").setLevel(logging.ERROR)
+logging.getLogger("obd").setLevel(logging.ERROR)   # убираем шум от внутренностей python-obd
 
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QFrame, QSizePolicy
+    QLabel, QPushButton, QFrame, QSizePolicy, QCheckBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer, QRectF
 from PyQt5.QtGui import (
@@ -204,6 +205,7 @@ class OBDApp(QMainWindow):
         self.connection = None
         self._connected = False
         self._connecting = False
+        self._connect_attempt_id = 0
         self.simulation_mode = False  # Динамический режим (по умолчанию LIVE)
         
         # Сигналы (связываем события фонового потока с методами GUI)
@@ -288,7 +290,20 @@ class OBDApp(QMainWindow):
         self.btn_connect.setFont(QFont("Helvetica", 12, QFont.Bold))
         self.btn_connect.clicked.connect(self._toggle_connection)
         
+        # Кнопка Safe Mode
+        self.btn_safe_mode = QPushButton("Safe Mode: OFF")
+        self.btn_safe_mode.setToolTip("Использовать медленное, но более надежное подключение для старых авто (fast=False)")
+        self.btn_safe_mode.setCheckable(True)
+        self.btn_safe_mode.setChecked(True) # Включаем по умолчанию
+        self.btn_safe_mode.setCursor(Qt.PointingHandCursor)
+        self.btn_safe_mode.setFixedSize(150, 40)
+        self.btn_safe_mode.setFont(QFont("Helvetica", 11, QFont.Bold))
+        self.btn_safe_mode.clicked.connect(self._update_safe_mode_ui)
+        self._update_safe_mode_ui() # Установим начальный стиль
+        
         header_layout.addLayout(title_layout)
+        header_layout.addWidget(self.btn_safe_mode)
+        header_layout.addSpacing(10)
         header_layout.addWidget(self.btn_mode)
         header_layout.addSpacing(10)
         header_layout.addWidget(self.btn_connect)
@@ -415,6 +430,24 @@ class OBDApp(QMainWindow):
             }
         """)
 
+    def _update_safe_mode_ui(self):
+        if self.btn_safe_mode.isChecked():
+            self.btn_safe_mode.setText("Safe Mode: ON")
+            self.btn_safe_mode.setStyleSheet("""
+                background-color: rgba(0, 229, 255, 0.1);
+                border: 1.5px solid #00e5ff;
+                color: #00e5ff;
+                border-radius: 8px;
+            """)
+        else:
+            self.btn_safe_mode.setText("Safe Mode: OFF")
+            self.btn_safe_mode.setStyleSheet("""
+                background-color: rgba(255, 255, 255, 0.03);
+                border: 1.5px solid rgba(255, 255, 255, 0.15);
+                color: #859398;
+                border-radius: 8px;
+            """)
+
     def _toggle_mode(self):
         if self._connected or self._connecting:
             # Блокируем смену режима, пока активно подключение
@@ -430,6 +463,7 @@ class OBDApp(QMainWindow):
                 background-color: rgba(0, 230, 118, 0.1);
                 border: 1.5px solid #00e676;
                 color: #00e676;
+                border-radius: 8px;
             """)
             self.lbl_badge.setText("● [SIMULATION]")
             self.lbl_badge.setStyleSheet("color: #00e676; margin-left: 15px;")
@@ -439,6 +473,7 @@ class OBDApp(QMainWindow):
                 background-color: rgba(255, 23, 68, 0.1);
                 border: 1.5px solid #ff1744;
                 color: #ff1744;
+                border-radius: 8px;
             """)
             self.lbl_badge.setText("● [OFFLINE]")
             self.lbl_badge.setStyleSheet("color: #ff1744; margin-left: 15px;")
@@ -448,6 +483,9 @@ class OBDApp(QMainWindow):
     # ------------------------------------------------------------------
     def _toggle_connection(self):
         if self._connecting:
+            logger.info("Пользователь отменил подключение в процессе.")
+            self._connect_attempt_id += 1
+            self._on_connect_fail_ui("CANCELLED")
             return
             
         if self._connected:
@@ -456,9 +494,19 @@ class OBDApp(QMainWindow):
         else:
             logger.info("Пользователь инициировал подключение. Режим симуляции: %s", self.simulation_mode)
             self._connecting = True
+            self._connect_attempt_id += 1
             
-            self.btn_connect.setText("Connecting...")
-            self.btn_connect.setEnabled(False)
+            self._use_fast_connection = not self.btn_safe_mode.isChecked()
+            self.btn_safe_mode.setEnabled(False)
+            
+            self.btn_connect.setText("Cancel")
+            self.btn_connect.setEnabled(True)
+            self.btn_connect.setStyleSheet("""
+                background-color: rgba(255, 171, 0, 0.1);
+                border: 1.5px solid #ffab00;
+                color: #ffab00;
+                border-radius: 8px;
+            """)
             self.btn_mode.setEnabled(False) # Блокируем тумблер во время подключения
             
             self.lbl_info.setText("Поиск ELM327 адаптера...")
@@ -473,6 +521,13 @@ class OBDApp(QMainWindow):
 
     # ---- Реальный режим (выполняется в фоне!) ----
     def _connect_real(self):
+        current_attempt = self._connect_attempt_id
+        is_fast = getattr(self, '_use_fast_connection', True)
+        timeout_val = 3 if is_fast else 10
+        
+        def is_cancelled():
+            return self._connect_attempt_id != current_attempt
+
         if not OBD_AVAILABLE:
             time.sleep(0.5)
             self.signals.connect_fail.emit("Библиотека python-obd не найдена!")
@@ -480,7 +535,87 @@ class OBDApp(QMainWindow):
 
         logger.info("Запуск реального подключения obd.Async...")
         try:
-            conn = obd.Async(fast=True, timeout=10, delay_cmds=0.25)
+            # Получаем список всех доступных портов
+            ports = obd.scan_serial()
+            logger.info("Найдены порты для проверки: %s", ports)
+            
+            conn = None
+            
+            # В Windows авто-определение скорости (baudrate) часто вызывает ошибку OSError(22).
+            # Поэтому мы перебираем порты вручную, перехватывая эту ошибку, чтобы программа не вылетала.
+            for port in ports:
+                if is_cancelled(): return
+                logger.info("Пробуем порт: %s", port)
+                
+                # Попытка 1: Указываем стандартный baudrate=38400 (стандарт для Bluetooth ELM327)
+                try:
+                    temp_conn = obd.Async(portstr=port, baudrate=38400, fast=is_fast, timeout=timeout_val, delay_cmds=0.25)
+                    if is_cancelled():
+                        temp_conn.close()
+                        return
+                    if temp_conn.status() != OBDStatus.NOT_CONNECTED:
+                        conn = temp_conn
+                        break
+                    temp_conn.close()
+                except Exception as e:
+                    logger.debug("Ошибка baudrate=38400 на порту %s: %s", port, e)
+                
+                # Попытка 2: Указываем baudrate=9600 (некоторые старые USB адаптеры)
+                try:
+                    if is_cancelled(): return
+                    temp_conn = obd.Async(portstr=port, baudrate=9600, fast=is_fast, timeout=timeout_val, delay_cmds=0.25)
+                    if is_cancelled():
+                        temp_conn.close()
+                        return
+                    if temp_conn.status() != OBDStatus.NOT_CONNECTED:
+                        conn = temp_conn
+                        break
+                    temp_conn.close()
+                except Exception as e:
+                    logger.debug("Ошибка baudrate=9600 на порту %s: %s", port, e)
+                
+                # Попытка 3: Дефолтный auto_baudrate
+                try:
+                    if is_cancelled(): return
+                    temp_conn = obd.Async(portstr=port, fast=is_fast, timeout=timeout_val, delay_cmds=0.25)
+                    if is_cancelled():
+                        temp_conn.close()
+                        return
+                    if temp_conn.status() != OBDStatus.NOT_CONNECTED:
+                        conn = temp_conn
+                        break
+                    temp_conn.close()
+                except Exception as e:
+                    logger.debug("Ошибка auto-baudrate на порту %s: %s", port, e)
+
+            if is_cancelled():
+                if conn:
+                    try: conn.close()
+                    except Exception: pass
+                return
+
+            # Если перебор не сработал (или список был пуст), пробуем стандартный fallback
+            if conn is None:
+                logger.info("Автоматический перебор не дал результатов, пробуем стандартный obd.Async...")
+                try:
+                    conn = obd.Async(fast=is_fast, timeout=timeout_val, delay_cmds=0.25)
+                except Exception as e:
+                    # Даже fallback может упасть с OSError(22) на Windows — перехватываем
+                    logger.warning("Стандартный obd.Async() не подключился: %s", e)
+                    conn = None
+
+            if is_cancelled():
+                if conn:
+                    try: conn.close()
+                    except Exception: pass
+                return
+
+            # Если conn всё ещё None — ни один порт не подошёл
+            if conn is None:
+                logger.warning("Ни один порт не дал подключения. Адаптер не найден.")
+                self.signals.connect_fail.emit("Адаптер не найден. Убедитесь, что адаптер подключён и сопряжён по Bluetooth.")
+                return
+
             status = conn.status()
             logger.info("Статус подключения obd: %s", status)
 
@@ -489,6 +624,11 @@ class OBDApp(QMainWindow):
                 try: conn.close()
                 except Exception: pass
                 self.signals.connect_fail.emit("Адаптер не найден. Проверьте USB/Bluetooth.")
+                return
+
+            if is_cancelled():
+                try: conn.close()
+                except Exception: pass
                 return
 
             # Логируем поддерживаемые команды для отладки
@@ -537,7 +677,13 @@ class OBDApp(QMainWindow):
 
     # ---- Режим симуляции (выполняется в фоне!) ----
     def _connect_simulation(self):
+        current_attempt = self._connect_attempt_id
+        def is_cancelled():
+            return self._connect_attempt_id != current_attempt
+
         time.sleep(0.5)
+        if is_cancelled():
+            return
         self._sim_stop.clear()
         self.signals.connect_ok.emit("SIMULATION", "SIMULATED")
 
@@ -593,6 +739,7 @@ class OBDApp(QMainWindow):
         self.btn_connect.setStyleSheet("") # Возврат к стандарту из CSS
         
         self.btn_mode.setEnabled(True) # Разблокируем тумблер
+        self.btn_safe_mode.setEnabled(True) # Разблокируем чекбокс
         
         self.lbl_status.setText("● Not Connected")
         self.lbl_status.setStyleSheet("color: #ff1744;")
@@ -688,6 +835,7 @@ class OBDApp(QMainWindow):
             background-color: rgba(255, 23, 68, 0.1);
             border: 1.5px solid #ff1744;
             color: #ff1744;
+            border-radius: 8px;
         """)
         
         if self.simulation_mode:
@@ -718,12 +866,18 @@ class OBDApp(QMainWindow):
         self.btn_connect.setStyleSheet("")
         
         self.btn_mode.setEnabled(True) # Разблокируем тумблер
+        self.btn_safe_mode.setEnabled(True) # Разблокируем чекбокс
         
-        self.lbl_status.setText("● Connection Failed")
-        self.lbl_status.setStyleSheet("color: #ff1744;")
-        self.lbl_info.setText(f"Ошибка: {error_msg}")
-        
-        self._update_mode_ui()
+        if error_msg == "CANCELLED":
+            self.lbl_status.setText("● Not Connected")
+            self.lbl_status.setStyleSheet("color: #ff1744;")
+            self.lbl_info.setText("Подключение отменено пользователем.")
+            self._update_mode_ui()
+        else:
+            self.lbl_status.setText("● Connection Failed")
+            self.lbl_status.setStyleSheet("color: #ff1744;")
+            self.lbl_info.setText(f"Ошибка: {error_msg}")
+            self._update_mode_ui()
 
     def _on_hw_disconnect_ui(self, msg: str):
         logger.warning("Аппаратный обрыв связи: %s", msg)
