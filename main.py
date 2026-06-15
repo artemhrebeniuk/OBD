@@ -49,7 +49,7 @@ logging.getLogger("obd").setLevel(logging.ERROR)   # убираем шум от 
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QFrame, QSizePolicy, QCheckBox, QComboBox
+    QLabel, QPushButton, QFrame, QSizePolicy, QCheckBox
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer, QRectF
 from PyQt5.QtGui import (
@@ -85,21 +85,6 @@ class UISignals(QObject):
     voltage_updated = pyqtSignal(str)
     ambient_updated = pyqtSignal(str)
     auto_switch_gauge = pyqtSignal(int)
-
-# ---------------------------------------------------------------------------
-#  Кастомный выпадающий список для автообновления COM-портов при клике
-# ---------------------------------------------------------------------------
-class PortComboBox(QComboBox):
-    def __init__(self, parent_app, parent=None):
-        super().__init__(parent)
-        self.parent_app = parent_app
-
-    def showPopup(self):
-        try:
-            self.parent_app._refresh_ports()
-        except Exception as e:
-            logger.error("Ошибка при обновлении портов при открытии списка: %s", e)
-        super().showPopup()
 
 # ---------------------------------------------------------------------------
 #  Виджет круговой шкалы (Gauge)
@@ -327,17 +312,7 @@ class OBDApp(QMainWindow):
         self.btn_safe_mode.clicked.connect(self._update_safe_mode_ui)
         self._update_safe_mode_ui() # Установим начальный стиль
         
-        # Селектор портов (Port Selector)
-        self.cb_ports = PortComboBox(self)
-        self.cb_ports.setFixedSize(160, 40)
-        self.cb_ports.setFont(QFont("Helvetica", 10))
-        self.cb_ports.setCursor(Qt.PointingHandCursor)
-        self.cb_ports.setToolTip("Выберите порт адаптера (для Bluetooth выберите Исходящий/Outgoing порт) или Auto Connect")
-        self._refresh_ports()
-        
         header_layout.addLayout(title_layout)
-        header_layout.addWidget(self.cb_ports)
-        header_layout.addSpacing(10)
         header_layout.addWidget(self.btn_safe_mode)
         header_layout.addSpacing(10)
         header_layout.addWidget(self.btn_mode)
@@ -464,42 +439,6 @@ class OBDApp(QMainWindow):
             QPushButton#modeToggleBtn {
                 /* Будет переопределено в _update_mode_ui */
             }
-            QComboBox {
-                background-color: rgba(124, 77, 255, 0.05);
-                border: 1.5px solid rgba(124, 77, 255, 0.4);
-                color: #cdbdff;
-                border-radius: 8px;
-                padding-left: 12px;
-                padding-right: 30px;
-            }
-            QComboBox:hover {
-                border: 1.5px solid #7c4dff;
-                background-color: rgba(124, 77, 255, 0.15);
-            }
-            QComboBox:disabled {
-                background-color: #12121A;
-                border: 1.5px solid #333344;
-                color: #4f4f5c;
-            }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 25px;
-                border-left: 1px solid rgba(124, 77, 255, 0.2);
-            }
-            QComboBox::down-arrow {
-                image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMiIgaGVpZ2h0PSIxMiIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiNjZGJkZmYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cG9seWxpbmUgcG9pbnRzPSI2IDkgMTIgMTUgMTggOSI+PC9wb2x5bGluZT48L3N2Zz4=);
-                width: 12px;
-                height: 12px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #12121A;
-                color: #cdbdff;
-                selection-background-color: #7c4dff;
-                selection-color: #ffffff;
-                border: 1.5px solid rgba(124, 77, 255, 0.5);
-                outline: 0px;
-            }
         """)
 
     def _update_safe_mode_ui(self):
@@ -550,52 +489,14 @@ class OBDApp(QMainWindow):
             self.lbl_badge.setText("● [OFFLINE]")
             self.lbl_badge.setStyleSheet("color: #ff1744; margin-left: 15px;")
 
-    def _refresh_ports(self):
-        """
-        Сканирует доступные последовательные/COM-порты в системе и
-        заполняет ими выпадающий список.
-        """
-        # Сохраняем выбранный порт, чтобы вернуть его после обновления
-        current_text = self.cb_ports.currentText() if hasattr(self, 'cb_ports') and self.cb_ports else ""
-        
-        self.cb_ports.clear()
-        self.cb_ports.addItem("Auto Connect")
-        
-        if not OBD_AVAILABLE:
-            return
-            
-        try:
-            ports = obd.scan_serial()
-            for p in ports:
-                self.cb_ports.addItem(p)
-            
-            # Восстанавливаем выбранное значение
-            if current_text:
-                index = self.cb_ports.findText(current_text)
-                if index >= 0:
-                    self.cb_ports.setCurrentIndex(index)
-                    
-            logger.info("Обновлен список портов в GUI: %s", ports)
-        except Exception as e:
-            logger.error("Ошибка сканирования портов: %s", e)
-
     # ------------------------------------------------------------------
     #  Управление подключением
     # ------------------------------------------------------------------
     def _toggle_connection(self):
         if self._connecting:
-            logger.info("Пользователь отменил подключение в процессе. Ожидание завершения потока...")
+            logger.info("Пользователь отменил подключение в процессе.")
             self._connect_attempt_id += 1
-            
-            # Блокируем кнопку подключения на время корректного завершения потока
-            self.btn_connect.setEnabled(False)
-            self.btn_connect.setText("Cancelling...")
-            self.lbl_info.setText("Остановка процессов... Пожалуйста, подождите.")
-            
-            # Опрос таймером завершения потока
-            self._cleanup_timer = QTimer(self)
-            self._cleanup_timer.timeout.connect(self._check_thread_exited)
-            self._cleanup_timer.start(200)
+            self._on_connect_fail_ui("CANCELLED")
             return
             
         if self._connected:
@@ -605,9 +506,6 @@ class OBDApp(QMainWindow):
             logger.info("Пользователь инициировал подключение. Режим симуляции: %s", self.simulation_mode)
             self._connecting = True
             self._connect_attempt_id += 1
-            
-            self._selected_port = self.cb_ports.currentText()
-            self.cb_ports.setEnabled(False)
             
             self._use_fast_connection = not self.btn_safe_mode.isChecked()
             self.btn_safe_mode.setEnabled(False)
@@ -630,20 +528,7 @@ class OBDApp(QMainWindow):
             self.lbl_badge.setStyleSheet("color: #ffab00; margin-left: 15px;")
 
             target = self._connect_simulation if self.simulation_mode else self._connect_real
-            self._connect_thread = threading.Thread(target=target, daemon=True)
-            self._connect_thread.start()
-
-    def _check_thread_exited(self):
-        """
-        Проверяет по таймеру, завершился ли фоновый поток подключения.
-        Как только поток умирает, завершает сброс UI в дефолтное состояние.
-        """
-        if not hasattr(self, '_connect_thread') or not self._connect_thread.is_alive():
-            if hasattr(self, '_cleanup_timer') and self._cleanup_timer:
-                self._cleanup_timer.stop()
-                self._cleanup_timer = None
-            logger.info("Фоновый поток подключения успешно завершен. Возврат UI в исходное состояние.")
-            self._on_connect_fail_ui("CANCELLED")
+            threading.Thread(target=target, daemon=True).start()
 
     # ---- Реальный режим (выполняется в фоне!) ----
     def _connect_real(self):
@@ -669,58 +554,52 @@ class OBDApp(QMainWindow):
             self.signals.connect_fail.emit("Библиотека python-obd не найдена!")
             return
 
-        selected_port = getattr(self, '_selected_port', 'Auto Connect')
-        logger.info("Запуск реального подключения obd.Async... Выбранный порт: %s", selected_port)
+        logger.info("Запуск реального подключения obd.Async...")
         try:
+            # Получаем список всех доступных портов
+            ports = obd.scan_serial()
+            logger.info("Найдены порты для проверки: %s", ports)
+            
             conn = None
             found_port = None
             found_baud = None
             
-            if selected_port != "Auto Connect":
-                logger.info("Подключаемся напрямую к выбранному порту: %s", selected_port)
-                found_port = selected_port
-                found_baud = None # Позволяем python-obd автоматически подобрать скорость на конкретном порту
-            else:
-                # Получаем список всех доступных портов
-                ports = obd.scan_serial()
-                logger.info("Найдены порты для проверки: %s", ports)
+            # ЭТАП 1: Быстрый поиск правильного порта (Fast Probe)
+            # Чтобы не зависать на "мертвых" COM-портах по несколько минут (из-за Safe Mode timeout=10),
+            # мы пробегаемся по всем портам с коротким таймаутом (1.5 секунды).
+            for port in ports:
+                if is_cancelled(): return
+                logger.info("Быстрый опрос порта: %s", port)
                 
-                # ЭТАП 1: Быстрый поиск правильного порта (Fast Probe)
-                # Чтобы не зависать на "мертвых" COM-портах по несколько минут (из-за Safe Mode timeout=10),
-                # мы пробегаемся по всем портам с умеренным таймаутом (3.0 секунды, чтобы дать время Bluetooth-стеку).
-                for port in ports:
+                for baud in [38400, 9600]:
                     if is_cancelled(): return
-                    logger.info("Быстрый опрос порта: %s", port)
-                    
-                    for baud in [38400, 9600, 115200]:
-                        if is_cancelled(): return
-                        try:
-                            # Пробное базовое подключение, чтобы узнать, ответит ли ELM327
-                            probe = obd.OBD(portstr=port, baudrate=baud, fast=True, timeout=3.0)
-                            status = probe.status()
-                            probe.close()
-                            
-                            if status != OBDStatus.NOT_CONNECTED:
-                                logger.info("✅ Адаптер откликнулся на порту %s (baudrate %s)", port, baud)
-                                found_port = port
-                                found_baud = baud
-                                break
-                        except Exception as e:
-                            logger.debug("Ошибка probe на %s (%s): %s", port, baud, e)
-                    
-                    if found_port:
-                        break
+                    try:
+                        # Пробное базовое подключение, чтобы узнать, ответит ли ELM327
+                        probe = obd.OBD(portstr=port, baudrate=baud, fast=True, timeout=1.5)
+                        status = probe.status()
+                        probe.close()
+                        
+                        if status != OBDStatus.NOT_CONNECTED:
+                            logger.info("✅ Адаптер откликнулся на порту %s (baudrate %s)", port, baud)
+                            found_port = port
+                            found_baud = baud
+                            break
+                    except Exception as e:
+                        logger.debug("Ошибка probe на %s (%s): %s", port, baud, e)
+                
+                if found_port:
+                    break
 
             if is_cancelled(): return
 
             # ЭТАП 2: Полноценное подключение Async (уже с учетом Safe Mode timeout)
             if found_port:
-                logger.info("Устанавливаем главное Async соединение на %s (baudrate: %s)...", found_port, found_baud)
+                logger.info("Устанавливаем главное Async соединение...")
                 try:
                     conn = obd.Async(portstr=found_port, baudrate=found_baud, fast=is_fast, timeout=timeout_val, delay_cmds=0.25)
                 except Exception as e:
                     logger.error("Ошибка при создании Async: %s", e)
-            elif selected_port == "Auto Connect":
+            else:
                 # Если перебор не сработал (или список был пуст), пробуем стандартный fallback
                 logger.info("Автоматический перебор не нашел адаптер. Пробуем стандартный fallback...")
                 try:
@@ -738,10 +617,7 @@ class OBDApp(QMainWindow):
             # Если conn всё ещё None — ни один порт не подошёл
             if conn is None:
                 logger.warning("Ни один порт не дал подключения. Адаптер не найден.")
-                if selected_port != "Auto Connect":
-                    self.signals.connect_fail.emit(f"Не удалось подключиться к порту {selected_port}. Убедитесь, что зажигание включено и порт выбран верно.")
-                else:
-                    self.signals.connect_fail.emit("Адаптер не найден. Попробуйте выбрать порт вручную из выпадающего списка.")
+                self.signals.connect_fail.emit("Адаптер не найден. Убедитесь, что адаптер подключён и сопряжён по Bluetooth.")
                 return
 
             status = conn.status()
@@ -751,10 +627,7 @@ class OBDApp(QMainWindow):
                 logger.warning("Адаптер ELM327 не найден.")
                 try: conn.close()
                 except Exception: pass
-                if selected_port != "Auto Connect":
-                    self.signals.connect_fail.emit(f"Не удалось подключиться к {selected_port}. Убедитесь, что зажигание включено.")
-                else:
-                    self.signals.connect_fail.emit("Адаптер не найден. Проверьте USB/Bluetooth или выберите порт вручную.")
+                self.signals.connect_fail.emit("Адаптер не найден. Проверьте USB/Bluetooth.")
                 return
 
             if is_cancelled():
@@ -883,7 +756,6 @@ class OBDApp(QMainWindow):
         
         self.btn_mode.setEnabled(True) # Разблокируем тумблер
         self.btn_safe_mode.setEnabled(True) # Разблокируем чекбокс
-        self.cb_ports.setEnabled(True) # Разблокируем селектор портов
         
         self.lbl_status.setText("● Not Connected")
         self.lbl_status.setStyleSheet("color: #ff1744;")
@@ -1011,7 +883,6 @@ class OBDApp(QMainWindow):
         
         self.btn_mode.setEnabled(True) # Разблокируем тумблер
         self.btn_safe_mode.setEnabled(True) # Разблокируем чекбокс
-        self.cb_ports.setEnabled(True) # Разблокируем селектор портов
         
         if error_msg == "CANCELLED":
             self.lbl_status.setText("● Not Connected")
