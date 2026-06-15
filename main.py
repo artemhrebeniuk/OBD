@@ -7,7 +7,7 @@ OBD-II Dashboard — кроссплатформенное приложение (
   • python-obd (obd.Async) — асинхронное чтение данных с ELM327
   • Pint (через obd.Unit) — конвертация и отображение величин
 
-Автор: OBD_CHECK project
+Автор: @mr_shpepe
 """
 
 import sys
@@ -90,6 +90,11 @@ class UISignals(QObject):
 #  Виджет круговой шкалы (Gauge)
 # ---------------------------------------------------------------------------
 class CircularGauge(QWidget):
+    """
+    Виджет круговой шкалы (Gauge).
+    Отрисовывает красивую спидометро-подобную шкалу с помощью QPainter.
+    Поддерживает динамическое изменение цвета с помощью градиентов.
+    """
     clicked = pyqtSignal()
 
     def __init__(self, title, unit, max_value=100.0, parent=None):
@@ -196,6 +201,12 @@ class CircularGauge(QWidget):
 #  Главный класс окна
 # ---------------------------------------------------------------------------
 class OBDApp(QMainWindow):
+    """
+    Главный класс окна приложения. 
+    Отвечает за отрисовку всего графического интерфейса, 
+    управление режимами (LIVE / SIMULATION) и обработку событий.
+    Взаимодействует с фоновыми потоками OBD через систему сигналов Qt (UISignals).
+    """
     def __init__(self):
         super().__init__()
         self.setWindowTitle("OBD-II Dashboard")
@@ -521,6 +532,16 @@ class OBDApp(QMainWindow):
 
     # ---- Реальный режим (выполняется в фоне!) ----
     def _connect_real(self):
+        """
+        Основной метод подключения к ELM327 адаптеру в реальном режиме.
+        Выполняется в отдельном потоке (daemon), чтобы не "вешать" интерфейс.
+        Алгоритм:
+        1. Сканирует порты.
+        2. Перебирает порты и скорости (baudrate). На Windows обходит баг OSError(22).
+        3. Если адаптер найден, проверяет поддерживаемые команды (PIDs).
+        4. Подписывается на нужные датчики (SPEED, RPM, BATTERY и т.д.).
+        5. Запускает асинхронный цикл опроса (conn.start()).
+        """
         current_attempt = self._connect_attempt_id
         is_fast = getattr(self, '_use_fast_connection', True)
         timeout_val = 3 if is_fast else 10
@@ -540,67 +561,50 @@ class OBDApp(QMainWindow):
             logger.info("Найдены порты для проверки: %s", ports)
             
             conn = None
+            found_port = None
+            found_baud = None
             
-            # В Windows авто-определение скорости (baudrate) часто вызывает ошибку OSError(22).
-            # Поэтому мы перебираем порты вручную, перехватывая эту ошибку, чтобы программа не вылетала.
+            # ЭТАП 1: Быстрый поиск правильного порта (Fast Probe)
+            # Чтобы не зависать на "мертвых" COM-портах по несколько минут (из-за Safe Mode timeout=10),
+            # мы пробегаемся по всем портам с коротким таймаутом (1.5 секунды).
             for port in ports:
                 if is_cancelled(): return
-                logger.info("Пробуем порт: %s", port)
+                logger.info("Быстрый опрос порта: %s", port)
                 
-                # Попытка 1: Указываем стандартный baudrate=38400 (стандарт для Bluetooth ELM327)
-                try:
-                    temp_conn = obd.Async(portstr=port, baudrate=38400, fast=is_fast, timeout=timeout_val, delay_cmds=0.25)
-                    if is_cancelled():
-                        temp_conn.close()
-                        return
-                    if temp_conn.status() != OBDStatus.NOT_CONNECTED:
-                        conn = temp_conn
-                        break
-                    temp_conn.close()
-                except Exception as e:
-                    logger.debug("Ошибка baudrate=38400 на порту %s: %s", port, e)
-                
-                # Попытка 2: Указываем baudrate=9600 (некоторые старые USB адаптеры)
-                try:
+                for baud in [38400, 9600]:
                     if is_cancelled(): return
-                    temp_conn = obd.Async(portstr=port, baudrate=9600, fast=is_fast, timeout=timeout_val, delay_cmds=0.25)
-                    if is_cancelled():
-                        temp_conn.close()
-                        return
-                    if temp_conn.status() != OBDStatus.NOT_CONNECTED:
-                        conn = temp_conn
-                        break
-                    temp_conn.close()
-                except Exception as e:
-                    logger.debug("Ошибка baudrate=9600 на порту %s: %s", port, e)
+                    try:
+                        # Пробное базовое подключение, чтобы узнать, ответит ли ELM327
+                        probe = obd.OBD(portstr=port, baudrate=baud, fast=True, timeout=1.5)
+                        status = probe.status()
+                        probe.close()
+                        
+                        if status != OBDStatus.NOT_CONNECTED:
+                            logger.info("✅ Адаптер откликнулся на порту %s (baudrate %s)", port, baud)
+                            found_port = port
+                            found_baud = baud
+                            break
+                    except Exception as e:
+                        logger.debug("Ошибка probe на %s (%s): %s", port, baud, e)
                 
-                # Попытка 3: Дефолтный auto_baudrate
+                if found_port:
+                    break
+
+            if is_cancelled(): return
+
+            # ЭТАП 2: Полноценное подключение Async (уже с учетом Safe Mode timeout)
+            if found_port:
+                logger.info("Устанавливаем главное Async соединение...")
                 try:
-                    if is_cancelled(): return
-                    temp_conn = obd.Async(portstr=port, fast=is_fast, timeout=timeout_val, delay_cmds=0.25)
-                    if is_cancelled():
-                        temp_conn.close()
-                        return
-                    if temp_conn.status() != OBDStatus.NOT_CONNECTED:
-                        conn = temp_conn
-                        break
-                    temp_conn.close()
+                    conn = obd.Async(portstr=found_port, baudrate=found_baud, fast=is_fast, timeout=timeout_val, delay_cmds=0.25)
                 except Exception as e:
-                    logger.debug("Ошибка auto-baudrate на порту %s: %s", port, e)
-
-            if is_cancelled():
-                if conn:
-                    try: conn.close()
-                    except Exception: pass
-                return
-
-            # Если перебор не сработал (или список был пуст), пробуем стандартный fallback
-            if conn is None:
-                logger.info("Автоматический перебор не дал результатов, пробуем стандартный obd.Async...")
+                    logger.error("Ошибка при создании Async: %s", e)
+            else:
+                # Если перебор не сработал (или список был пуст), пробуем стандартный fallback
+                logger.info("Автоматический перебор не нашел адаптер. Пробуем стандартный fallback...")
                 try:
                     conn = obd.Async(fast=is_fast, timeout=timeout_val, delay_cmds=0.25)
                 except Exception as e:
-                    # Даже fallback может упасть с OSError(22) на Windows — перехватываем
                     logger.warning("Стандартный obd.Async() не подключился: %s", e)
                     conn = None
 
@@ -679,6 +683,11 @@ class OBDApp(QMainWindow):
 
     # ---- Режим симуляции (выполняется в фоне!) ----
     def _connect_simulation(self):
+        """
+        Метод запуска режима симуляции. 
+        Запускает отдельный поток (_simulation_loop), который генерирует 
+        случайные, но реалистичные значения для всех датчиков.
+        """
         current_attempt = self._connect_attempt_id
         def is_cancelled():
             return self._connect_attempt_id != current_attempt
@@ -714,6 +723,11 @@ class OBDApp(QMainWindow):
 
     # ---- Отключение ----
     def _disconnect(self):
+        """
+        Безопасное отключение адаптера или режима симуляции.
+        Останавливает все фоновые потоки, закрывает COM-порт и
+        возвращает графический интерфейс в исходное состояние "Not Connected".
+        """
         logger.info("Остановка процессов и отключение...")
         self._sim_stop.set()
         if self._sim_thread:
@@ -887,7 +901,12 @@ class OBDApp(QMainWindow):
         self.lbl_info.setText(f"Обрыв связи: {msg}")
 
     def _watchdog_check(self):
-        """Проверка статуса подключения по таймеру (главный поток)."""
+        """
+        Проверка статуса подключения по таймеру (главный поток).
+        Таймер срабатывает каждые 2 секунды. 
+        Если фоновый поток библиотеки python-obd остановился из-за ошибки (например, выдернули провод),
+        этот метод отловит проблему и безопасно завершит сессию, уведомив пользователя об обрыве.
+        """
         if self.simulation_mode or not self._connected:
             return
         try:

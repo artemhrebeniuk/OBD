@@ -33,6 +33,9 @@
 5. **Ротируемое логирование**:
    - Логи пишутся в файл `obd_dashboard.log` рядом с исполняемым файлом (как `.py`, так и собранным `.exe`).
    - Файл логирования ограничен размером в 5 МБ с автоматической ротацией (сохраняется один бэкап-файл `obd_dashboard.log.1`). Шумные предупреждения сторонних библиотек (`pint` и `obd`) отключаются.
+6. **Безопасное / Медленное подключение (Safe Mode)**:
+   - Интегрирована кнопка переключения режима подключения ("Safe Mode"). При её активации программа запускает `obd.Async` с параметром `fast=False` и увеличенным таймаутом (10 секунд).
+   - Safe Mode включен **по умолчанию (ON)**, что гарантирует совместимость с устаревшими моделями автомобилей и бюджетными адаптерами ELM327, у которых оптимизированный опрос вызывает сбои.
 
 ---
 
@@ -52,6 +55,30 @@
 - [requirements.txt](file:///Users/mr_shpepe/Documents/OBD_CHECK/requirements.txt) — список библиотек-зависимостей.
 - [DESIGN.md](file:///Users/mr_shpepe/Documents/OBD_CHECK/DESIGN.md) — требования к дизайну и UI/UX.
 - `obd_dashboard.log` — файл с актуальными логами работы приложения.
+
+---
+
+## 🚀 Сохранение изменений в GitHub (Commit & Push)
+
+Если вы внесли изменения в код и хотите сохранить их в свой репозиторий на GitHub (`https://github.com/artemhrebeniuk/OBD.git`), используйте следующие команды в терминале:
+
+1. Проверьте статус измененных файлов:
+   ```bash
+   git status
+   ```
+2. Добавьте все изменения в индекс:
+   ```bash
+   git add .
+   ```
+3. Создайте коммит с описанием изменений (например, "Добавлены комментарии и Safe Mode"):
+   ```bash
+   git commit -m "Ваше описание изменений"
+   ```
+4. Отправьте изменения на GitHub:
+   ```bash
+   git push origin main
+   ```
+*(Если ветка называется `master`, используйте `git push origin master`)*
 
 ---
 
@@ -82,6 +109,31 @@ pyinstaller --noconsole --onefile --clean --name "OBD_Dashboard" main.py
 ```
 *Примечание:* Для сборки под Windows команду нужно выполнять непосредственно на ОС Windows.
 
+### 4. Обход опечатки в библиотеке python-obd
+В библиотеке `python-obd` допущена историческая опечатка: датчик температуры окружающего воздуха зарегистрирован как `AMBIANT_AIR_TEMP` (через **A**), а не `AMBIENT_AIR_TEMP`.
+Чтобы код не ломался в будущем, если авторы библиотеки исправят опечатку, обращение к команде реализовано динамически:
+```python
+cmd_ambient = getattr(obd.commands, "AMBIANT_AIR_TEMP", getattr(obd.commands, "AMBIENT_AIR_TEMP", None))
+```
+Всегда используйте эту конструкцию при работе с температурой окружающего воздуха.
+
+### 5. Сравнение статуса подключения
+Метод `status()` возвращает объект `OBDStatus`. При приведении к строке `str(status)` возвращаются текстовые значения вроде `"Car Connected"`.
+В коде GUI сравнение должно производиться регистронезависимо с приведением к нижнему регистру:
+```python
+if "car connected" in status.lower() or "car_connected" in status.lower():
+```
+Не сравнивайте напрямую с `"CAR_CONNECTED"`, так как это приведет к ложному срабатыванию условия "зажигание выключено".
+
+### 6. Эмуляция и тестирование на Windows
+Для отладки программы без автомобиля на Windows используется следующая связка:
+1. **com0com**: Создает пару связанных виртуальных COM-портов (например, `COM3` и `COM4`).
+2. **ELM327 Emulator** (например, [elm327-emulator](https://github.com/brendan-w/python-OBD) или аналогичные скрипты на Python):
+   - Запускается на одном порту (например, `COM3`) на скорости `38400`.
+   - Имитирует ответы ЭБУ, включая генерацию динамически меняющихся показаний (скорость, обороты и т.д.).
+3. **OBD Dashboard**: подключается ко второму порту (например, `COM4`).
+*Важно:* Динамическое изменение стрелок на экране при подключении к эмулятору является штатным поведением генератора данных эмулятора.
+
 ---
 
 ## 📖 Полная документация библиотеки python-obd (для справки)
@@ -91,7 +143,7 @@ pyinstaller --noconsole --onefile --clean --name "OBD_Dashboard" main.py
 ---
 
 
-# Welcome
+### Welcome
 
 Python-OBD is a library for handling data from a car's [**O**n-**B**oard **D**iagnostics](https://en.wikipedia.org/wiki/On-board_diagnostics) port. Please keep in mind that the car **must** have OBD-II (any car made in 1996 and up); this will _**not**_ work with OBD-I.
 
@@ -101,7 +153,7 @@ Python-OBD can stream real time sensor data, perform diagnostics (such as readin
 
 <br>
 
-## Installation
+#### Installation
 
 Install the latest release from pypi:
 
@@ -117,7 +169,7 @@ $ sudo apt-get install bluetooth bluez-utils blueman
 
 <br>
 
-## Basic Usage
+#### Basic Usage
 
 ```python
 import obd
@@ -136,7 +188,7 @@ OBD connections operate in a request-reply fashion. To retrieve data from the ca
 
 <br>
 
-## Module Layout
+#### Module Layout
 
 ```python
 import obd
@@ -154,7 +206,7 @@ obd.logger         # the OBD module's root logger (for debug)
 
 <br>
 
-## License
+#### License
 
 GNU General Public License V2
 
@@ -165,7 +217,7 @@ GNU General Public License V2
 
 ---
 
-# README
+### README
 
 python-OBD
 ==========
@@ -234,7 +286,7 @@ Here are a handful of the supported commands (sensors). For a full list, see [th
 Common Issues
 -------------
 
-### Bluetooth OBD-II Adapters
+##### Bluetooth OBD-II Adapters
 
 There are sometimes connection issues when using a Bluetooth OBD-II adapter with some devices (the Raspberry Pi is a common problem). This can be fixed by setting the following arguments when setting up the connection:
 
@@ -257,7 +309,7 @@ Enjoy and drive safe!
 
 ---
 
-# Connections
+### Connections
 
 After installing the library, simply `import obd`, and create a new OBD connection object. By default, python-OBD will scan for Bluetooth and USB serial ports (in that order), and will pick the first connection it finds. The port can also be specified manually by passing a connection string to the OBD constructor. You can also use the `scan_serial` helper retrieve a list of connected ports.
 
@@ -280,7 +332,7 @@ connection = obd.OBD(ports[0]) # connect to the first port in the list
 
 <br>
 
-### OBD(portstr=None, baudrate=None, protocol=None, fast=True, timeout=0.1, check_voltage=True, start_low_power=False):
+##### OBD(portstr=None, baudrate=None, protocol=None, fast=True, timeout=0.1, check_voltage=True, start_low_power=False):
 
 `portstr`: The UNIX device file or Windows COM Port for your adapter. The default value (`None`) will auto select a port.
 
@@ -305,7 +357,7 @@ Disabling fast mode will guarantee that python-OBD outputs the unaltered command
 
 ---
 
-### query(command, force=False)
+##### query(command, force=False)
 
 Sends an `OBDCommand` to the car, and returns an `OBDResponse` object. This function will block until a response is received from the car. This function will also check whether the given command is supported by your car. If a command is not marked as supported, it will not be sent, and an empty `OBDResponse` will be returned. To force an unsupported command to be sent, there is an optional `force` parameter for your convenience.
 
@@ -320,7 +372,7 @@ r = connection.query(obd.commands.RPM) # returns the response from the car
 
 ---
 
-### status()
+##### status()
 
 Returns a string value reflecting the status of the connection after OBD() or Async() methods are executed. These values should be compared against the `OBDStatus` class. The fact that they are strings is for human readability only. There are currently 4 possible states:
 
@@ -351,7 +403,7 @@ The ELM327 controller allows OBD Commands and AT Commands. In general, OBD Comma
 
 ---
 
-### is_connected()
+##### is_connected()
 
 Returns a boolean for whether a connection was established with the vehicle. It is identical to writing:
 
@@ -361,20 +413,20 @@ connection.status() == OBDStatus.CAR_CONNECTED
 
 ---
 
-### port_name()
+##### port_name()
 
 Returns the string name for the currently connected port (`"/dev/ttyUSB0"`). If no connection was made, this function returns an empty string.
 
 ---
 
-### supports(command)
+##### supports(command)
 
 Returns a boolean for whether a command is supported by both the car and python-OBD
 
 ---
 
-### protocol_id()
-### protocol_name()
+##### protocol_id()
+##### protocol_name()
 
 Both functions return string names for the protocol currently being used by the adapter. Protocol *ID's* are the short values used by your adapter, whereas protocol *names* are the human-readable versions. The `protocol_id()` function is a good way to lookup which value to pass in the `protocol` field of the OBD constructor (though, this is mainly for advanced usage). These functions do not make any serial requests. When no connection has been made, these functions will return empty strings. The possible values are:
 
@@ -397,7 +449,7 @@ Both functions return string names for the protocol currently being used by the 
 
 <!--
 
-### ecus()
+##### ecus()
 
 Returns a list of identified "Engine Control Units" visible to the adapter. Each value in the list is a constant representing that ECU's function. These constants are found in the `ECU` class:
 
@@ -412,13 +464,13 @@ Python-OBD can currently only detect the engine computer, but future versions ma
 
 -->
 
-### close()
+##### close()
 
 Closes the connection.
 
 ---
 
-### supported_commands
+##### supported_commands
 
 Property containing a `set` of commands that are supported by the car.
 
@@ -438,7 +490,7 @@ connection.supported_commands.add(<OBDCommand>)
 
 ---
 
-# Async Connections
+### Async Connections
 
 Since the standard `query()` function is blocking, it can be a hazard for UI event loops. To deal with this, python-OBD has an `Async` connection object that can be used in place of the standard `OBD` object. `Async` is a subclass of `OBD`, and therefore inherits all of the standard methods. However, `Async` adds a few in order to control a threaded update loop. This loop will keep the values of your commands up to date with the vehicle. This way, when the user `query`s the car, the latest response is returned immediately.
 
@@ -489,7 +541,7 @@ connection.stop()
 
 ---
 
-### Async(portstr=None, baudrate=None, protocol=None, fast=True, timeout=0.1, check_voltage=True, delay_cmds=0.25)
+##### Async(portstr=None, baudrate=None, protocol=None, fast=True, timeout=0.1, check_voltage=True, delay_cmds=0.25)
 
 Create asynchronous connection.
 Arguments are the same as 'obd.OBD()' with the addition of *delay_cmds*, which defaults to 0.25 seconds and allows
@@ -498,19 +550,19 @@ the background thread continuously repeats the execution of all commands without
 
 ---
 
-### start()
+##### start()
 
 Starts the update loop.
 
 ---
 
-### stop()
+##### stop()
 
 Stops the update loop.
 
 ---
 
-### paused()
+##### paused()
 
 A helper function for use in a Context Manager (a `with` statement) to temporarily stop the update loop. This makes it easy to protect your `watch()` and `unwatch()` calls. If the update loop was running at the time of being paused, it will be restarted upon exitting the context block. For instance:
 
@@ -534,7 +586,7 @@ if was_running:
 
 ---
 
-### watch(command, callback=None, force=False)
+##### watch(command, callback=None, force=False)
 
 *Note: The async loop must be stopped or paused before this function can be called*
 
@@ -542,7 +594,7 @@ Subscribes a command to be continuously updated. After calling `watch()`, the `q
 
 ---
 
-### unwatch(command, callback=None)
+##### unwatch(command, callback=None)
 
 *Note: The async loop must be stopped or paused before this function can be called*
 
@@ -550,7 +602,7 @@ Unsubscribes a command from being updated. If no callback is specified, all call
 
 ---
 
-### unwatch_all()
+##### unwatch_all()
 
 *Note: The async loop must be stopped or paused before this function can be called*
 
@@ -563,7 +615,7 @@ Unsubscribes all commands and callbacks.
 
 ---
 
-# Responses
+### Responses
 
 The `query()` function returns `OBDResponse` objects. These objects have the following properties:
 
@@ -578,7 +630,7 @@ The `query()` function returns `OBDResponse` objects. These objects have the fol
 
 ---
 
-## is_null()
+#### is_null()
 
 Use this function to check if a response is empty. Python-OBD will emit empty responses when it is unable to retrieve data from the car.
 
@@ -592,7 +644,7 @@ if not r.is_null():
 ---
 
 
-## Pint Values
+#### Pint Values
 
 The `value` property typically contains a [Pint](http://pint.readthedocs.io/en/latest/) `Quantity` object, but can also hold complex structures (depending on the request). Pint quantities combine a value and unit into a single class, and are used to represent physical values such as "4 seconds", and "88 mph". This allows for consistency when doing math and unit conversions. Pint maintains a registry of units, which is exposed in python-OBD as `obd.Unit`.
 
@@ -638,7 +690,7 @@ import obd
 
 ---
 
-## Status
+#### Status
 
 The status command returns information about the Malfunction Indicator Light (check-engine light), the number of trouble codes being thrown, and the type of engine.
 
@@ -678,7 +730,7 @@ Here are all of the tests names that python-OBD reports:
 
 ---
 
-## Diagnostic Trouble Codes (DTCs)
+#### Diagnostic Trouble Codes (DTCs)
 
 Each DTC is represented by a tuple containing the DTC code, and a description (if python-OBD has one). For commands that return multiple DTCs, a list is used.
 
@@ -696,7 +748,7 @@ response.value = ("P0104", "Mass or Volume Air Flow Circuit Intermittent")
 
 ---
 
-## Fuel Status
+#### Fuel Status
 
 The fuel status is a tuple of two strings, telling the status of the first and second fuel systems. Most cars only have one system, so the second element will likely be an empty string. The possible fuel statuses are:
 
@@ -711,7 +763,7 @@ The fuel status is a tuple of two strings, telling the status of the first and s
 
 ---
 
-## Air Status
+#### Air Status
 
 The air status will be one of these strings:
 
@@ -724,7 +776,7 @@ The air status will be one of these strings:
 
 ---
 
-## Oxygen Sensors Present
+#### Oxygen Sensors Present
 
 Returns a 2D structure of tuples (representing bank and sensor number), that holds boolean values for sensor presence.
 
@@ -750,7 +802,7 @@ response.value[1][2] == True # Bank 1, Sensor 2 is present
 ```
 ---
 
-## Monitors (Mode 06 Responses)
+#### Monitors (Mode 06 Responses)
 
 All mode 06 commands return `Monitor` objects holding various test results for the requested sensor. A single monitor response can hold multiple tests, in the form of `MonitorTest` objects. The OBD standard defines some tests, but vehicles can always implement custom tests beyond the standard. Here are the standard Test IDs (TIDs) that python-OBD will recognize:
 
@@ -823,7 +875,7 @@ else:
 
 ---
 
-# Command Lookup
+### Command Lookup
 
 `OBDCommand`s are objects used to query information from the vehicle. They contain all of the information necessary to perform the query and decode the car's response. Python-OBD has [built in tables](Command Tables.md) for the most common commands. They can be looked up by name or by mode & PID.
 
@@ -845,7 +897,7 @@ The `commands` table also has a few helper methods for determining if a particul
 
 ---
 
-### has_command(command)
+##### has_command(command)
 
 Checks the internal command tables for the existance of the given `OBDCommand` object. Commands are compared by mode and PID value.
 
@@ -856,7 +908,7 @@ obd.commands.has_command(obd.commands.RPM) # True
 
 ---
 
-### has_name(name)
+##### has_name(name)
 
 Checks the internal command tables for a command with the given name. This is also the function of the `in` operator.
 
@@ -872,7 +924,7 @@ obd.commands.has_name('RPM') # True
 
 ---
 
-### has_pid(mode, pid)
+##### has_pid(mode, pid)
 
 Checks the internal command tables for a command with the given mode and PID.
 
@@ -888,9 +940,9 @@ obd.commands.has_pid(1, 12) # True
 
 ---
 
-# Commands
+### Commands
 
-## OBD-II adapter (ELM327 commands)
+#### OBD-II adapter (ELM327 commands)
 
 |PID  | Name        | Description                             | Response Value        |
 |-----|-------------|-----------------------------------------|-----------------------|
@@ -899,7 +951,7 @@ obd.commands.has_pid(1, 12) # True
 
 <br>
 
-## Mode 01
+#### Mode 01
 
 |PID | Name                      | Description                             | Response Value        |
 |----|---------------------------|-----------------------------------------|-----------------------|
@@ -1002,7 +1054,7 @@ obd.commands.has_pid(1, 12) # True
 
 <br>
 
-## Mode 02
+#### Mode 02
 
 Mode 02 commands are the same as mode 01, but are metrics from when the last DTC occurred (the freeze frame). To access them by name, simple prepend `DTC_` to the Mode 01 command name.
 
@@ -1016,7 +1068,7 @@ obd.commands.DTC_RPM # the Mode 02 command
 
 <br>
 
-## Mode 03
+#### Mode 03
 
 Mode 03 contains a single command `GET_DTC` which requests all diagnostic trouble codes from the vehicle. The response will contain the codes themselves, as well as a description (if python-OBD has one). See the [DTC Responses](Responses.md#diagnostic-trouble-codes-dtcs) section for more details.
 
@@ -1027,7 +1079,7 @@ Mode 03 contains a single command `GET_DTC` which requests all diagnostic troubl
 
 <br>
 
-## Mode 04
+#### Mode 04
 
 |PID  | Name      | Description                             | Response Value        |
 |-----|-----------|-----------------------------------------|-----------------------|
@@ -1035,7 +1087,7 @@ Mode 03 contains a single command `GET_DTC` which requests all diagnostic troubl
 
 <br>
 
-## Mode 06
+#### Mode 06
 
 <span style="color:red">*WARNING: mode 06 is experimental. While it passes software tests, it has not been tested on a real vehicle. Any debug output for this mode would be greatly appreciated.*</span>
 
@@ -1144,7 +1196,7 @@ Mode 06 commands are used to monitor various test results from the vehicle. All 
 
 <br>
 
-## Mode 07
+#### Mode 07
 
 The return value will be encoded in the same structure as the Mode 03 `GET_DTC` command.
 
@@ -1154,7 +1206,7 @@ The return value will be encoded in the same structure as the Mode 03 `GET_DTC` 
 
 <br>
 
-## Mode 09
+#### Mode 09
 
 <span style="color:red">*WARNING: mode 09 is experimental. While it has been tested on a hardware simulator, only a subset of the supported
 commands have (00-06) been tested. Any debug output for this mode, especially for the untested PIDs, would be greatly appreciated.*</span>
@@ -1179,7 +1231,7 @@ commands have (00-06) been tested. Any debug output for this mode, especially fo
 
 ---
 
-# Custom Commands
+### Custom Commands
 
 If the command you need is not in python-OBDs tables, you can create a new `OBDCommand` object. The constructor accepts the following arguments (each will become a property).
 
@@ -1195,7 +1247,7 @@ If the command you need is not in python-OBDs tables, you can create a new `OBDC
 | header (optional)    | string   | If set, use a custom header instead of the default one (7E0)               |
 
 
-## Example
+#### Example
 
 ```python
 from obd import OBDCommand, Unit
@@ -1239,7 +1291,7 @@ Here are some details on the less intuitive fields of an OBDCommand:
 
 ---
 
-## OBDCommand.decoder
+#### OBDCommand.decoder
 
 The `decoder` argument is a function of following form.
 
@@ -1264,7 +1316,7 @@ def <name>(messages):
 
 ---
 
-## OBDCommand.ecu
+#### OBDCommand.ecu
 
 The `ecu` argument is a constant used to filter incoming messages. Some commands may listen to multiple ECUs (such as DTC decoders), where others may only be concerned with the engine (such as RPM). Currently, python-OBD can only distinguish the engine, but this list may be expanded over time:
 
@@ -1275,13 +1327,13 @@ The `ecu` argument is a constant used to filter incoming messages. Some commands
 
 ---
 
-## OBDCommand.fast
+#### OBDCommand.fast
 
 The optional `fast` argument tells python-OBD whether it is safe to append a `"01"` to the end of the command. This will instruct the adapter to return the first response it recieves, rather than waiting for more (and eventually reaching a timeout). This can speed up requests significantly, and is enabled for most of python-OBDs internal commands. However, for unusual commands, it is safest to leave this disabled.
 
 ---
 
-## OBDCommand.header
+#### OBDCommand.header
 
 The optional `header` argument tells python-OBD to use a custom header when querying the command. If not set, python-OBD assumes that the default 7E0 header is needed for querying the command. The switch between default and custom header (and vice versa) is automatically done by python-OBD.
 
@@ -1292,7 +1344,7 @@ The optional `header` argument tells python-OBD to use a custom header when quer
 
 ---
 
-# Debug Output
+### Debug Output
 
 If python-OBD is not working properly, the first thing you should do is enable debug output. Add the following line before your connection code to print all of the debug information to your console:
 
@@ -1304,7 +1356,7 @@ Here are some common logs from python-OBD, and their meanings:
 
 <br>
 
-### Successful Connection
+##### Successful Connection
 
 ```none
 [obd] ========================== python-OBD (v0.4.0) ==========================
@@ -1343,7 +1395,7 @@ Here are some common logs from python-OBD, and their meanings:
 
 <br>
 
-### Unresponsive ELM
+##### Unresponsive ELM
 
 ```none
 [obd] ========================== python-OBD (v0.4.0) ==========================
@@ -1384,7 +1436,7 @@ print ports                    # ['/dev/ttyUSB0', '/dev/ttyUSB1']
 
 <br>
 
-### Unresponsive Vehicle
+##### Unresponsive Vehicle
 
 ```none
 [obd] ========================== python-OBD (v0.4.0) ==========================
@@ -1421,7 +1473,7 @@ This is a connection problem between the ELM adapter and your car. Make sure tha
 
 ---
 
-# Debug
+### Debug
 
 python-OBD uses python's builtin logging system. By default, it is setup to send output to `stderr` with a level of WARNING. The module's logger can be accessed via the `logger` variable at the root of the module. For instance, to enable console printing of all debug messages, use the following snippet:
 
